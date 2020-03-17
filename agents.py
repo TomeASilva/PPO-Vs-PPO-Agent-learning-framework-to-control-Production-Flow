@@ -57,12 +57,12 @@ def summarize_performance(path):
     # print("Total reward", production_system.sum_rewards)
 
     return (lead_time, flow_time, wip, throughput, parts_produced)
-def build_networks (layer_sizes, activations, input):
+def build_networks (layer_sizes, activations, input, istrunk=False):
     num_layers = len(layer_sizes)
     output = keras.layers.Dense(units=layer_sizes[0], kernel_initializer='glorot_normal')(input)
     output = keras.layers.PReLU()(output)
     for i in range(1, num_layers):
-        if i == num_layers - 1:
+        if i == num_layers - 1 and not istrunk:
             output = keras.layers.Dense(units=layer_sizes[i], activation=activations[i], kernel_initializer='glorot_normal')(output)
         else:
             output = keras.layers.Dense(units=layer_sizes[i], kernel_initializer='glorot_normal')(output)
@@ -121,7 +121,7 @@ class PPO(BasePolicy):
     def build_models(self):
 
         self.input = keras.Input(shape=(self.input_layer_size), name="state", dtype=tf.float32)
-        self.trunk = build_networks(**self.trunk_config, input=self.input)
+        self.trunk = build_networks(**self.trunk_config, input=self.input, istrunk=True)
         mu_head = build_networks(**self.mu_head_config, input=self.trunk)
         cov_head = build_networks(**self.cov_head_config, input=self.trunk)
         critic = build_networks(**self.critic_net_config, input=self.input)
@@ -131,7 +131,7 @@ class PPO(BasePolicy):
         self.actor_cov = build_model(self.input, cov_head, "actor_cov")
         self.critic = build_model(self.input, critic, "critic")
         #---Start Find the variables of the actor cov model
-        actor_cov_n_layers_head = len(self.cov_head_config["layer_sizes"])
+        actor_cov_n_layers_head = len(self.cov_head_config["layer_sizes"]) * 2 - 1
         actor_cov_total_n_layers = len(self.actor_cov.layers)
         cov_head_variables = []
         
@@ -155,14 +155,14 @@ class PPO(BasePolicy):
 
         if self.agent_name == "Global Agent":
           
-            self.trunk_old = build_networks(**self.trunk_config, input=self.input)
+            self.trunk_old = build_networks(**self.trunk_config, input=self.input, istrunk=True)
             mu_head_old = build_networks(**self.mu_head_config, input=self.trunk_old)
             cov_head_old = build_networks(**self.cov_head_config, input=self.trunk_old)
             self.actor_mu_old = build_model(self.input, mu_head_old, "actor_mu_old")
             self.actor_cov_old = build_model(self.input, cov_head_old, "actor_cov_old")
 
             #---Start Find the variables of the actor cov model
-            actor_cov_n_layers_head_old = len(self.cov_head_config["layer_sizes"])
+            actor_cov_n_layers_head_old = len(self.cov_head_config["layer_sizes"]) * 2  - 1
             actor_cov_total_n_layers_old = len(self.actor_cov_old.layers)
             cov_head_variables_old = []
             for i in range (actor_cov_total_n_layers_old - actor_cov_n_layers_head_old, actor_cov_total_n_layers_old, 1):
@@ -255,7 +255,8 @@ class PPO(BasePolicy):
         # ---START Generates the average and standard deviation for the wip at the given stage
         mu = self.actor_mu(state)
         cov = self.actor_cov(state)
-        
+        mu = tf.clip_by_value(mu, 0, self.action_range[1]) 
+        cov = tf.clip_by_value(cov, 0, self.action_range[1]) 
         # print(f"Average: {mu}")
         # print(f"Std: {cov}")
         # ---END Generates the average and standard deviation for the wip at the given stage
@@ -570,9 +571,10 @@ class GlobalAgent(Agent):
             #     for variable in model:
             #         tf.print(variable)        
 
-            return "Loading models for the fixed policy was succefull"
+            return f"Loading models for the fixed policy of {self.name} was successfull"
+
         except Exception as message:
-            return (str(message) + "\n" + "The weights for the fixed policy will be randomly generated")
+            return (str(message) + "\n" + f"The weights for the fixed policy of {self.name} will be randomly generated")
     def restore_old_models(self, ppo_config):
         
         
@@ -617,9 +619,9 @@ class GlobalAgent(Agent):
                            "critic": [variable.numpy() for variable in self.PPO.critic.trainable_variables]
                            }
 
-            return "Loading models for the training policy was succefull"
+            return f"Loading models for the training policy of {self.name} was succefull"
         except Exception as message:
-            return (str(message) + "\n" + "The weights will be randomly generated")
+            return (str(message) + "\n" + f"The weights will of training policy for {self.name} be randomly generated")
     def training_loop(self):
         try:
             #---START Create a summary writer
@@ -836,7 +838,7 @@ class GlobalAgent(Agent):
                     print(f"Reward {reward_PPO}") 
                     print("--------------Fixed Policy---------------")
                     summarize_performance(path_fixed)
-                    print(reward_fixed)
+                    print(f"Reward {reward_fixed}")
                     print("--------------ConWip-------------")
                     summarize_performance(path_conwip)                    
 
@@ -894,7 +896,7 @@ class GlobalAgent(Agent):
                 print(f"Reward {reward_PPO}") 
                 print("--------------Fixed Policy---------------")
                 summarize_performance(path_fixed)
-                print(reward_fixed)
+                print(f"Reward {reward_fixed}")
                 print("--------------ConWip-------------")
                 summarize_performance(path_conwip)                    
             # av_reward = sum(rewards_volatile) / len(rewards_volatile)
@@ -921,7 +923,8 @@ class GlobalAgent(Agent):
                 print(f"Reward {reward_PPO}") 
                 print("--------------Fixed Policy---------------")
                 summarize_performance(path_fixed)
-                print(reward_fixed)
+                print(f"Reward {reward_fixed}")
+
                 print("--------------ConWip-------------")
                 summarize_performance(path_conwip)                    
                 
@@ -953,6 +956,7 @@ class GlobalAgent(Agent):
                     gradient_logger.debug(value)
 
             mu = self.PPO.actor_mu(states)
+            mu = tf.clip_by_value(mu, 0, self.action_range[1])
             
             if self.log_gradient_descent:        
                 gradient_logger.debug(f"MU")
@@ -960,6 +964,7 @@ class GlobalAgent(Agent):
                     gradient_logger.debug (value)
                 
             cov = self.PPO.actor_cov(states)
+            cov = tf.clip_by_value(cov, 0, self.action_range[1])
             
             if self.log_gradient_descent:        
                 gradient_logger.debug(f"Cov")
@@ -967,7 +972,9 @@ class GlobalAgent(Agent):
                     gradient_logger.debug(value)
                 
             mu_old = tf.stop_gradient(self.PPO.actor_mu_old(states))
+            mu_old = tf.clip_by_value(mu_old, 0, self.action_range[1])
             cov_old = tf.stop_gradient(self.PPO.actor_cov_old(states))
+            cov_old = tf.clip_by_value(cov_old, 0, self.action_range[1])
             
             if self.log_gradient_descent:        
                 gradient_logger.debug(f"MU_old")
@@ -1148,9 +1155,6 @@ class WorkerAgent(Agent):
         #     return (str(message) + "\n" + f"The weights for the fixed policy of the {self.name} will be randomly generated")
 
         
-     
-        
-        
     
     def training_loop(self):
          # ---START build NETworks for critic and actor
@@ -1158,7 +1162,7 @@ class WorkerAgent(Agent):
             self.writer = tf.summary.create_file_writer(f"./summaries/global/{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}_{self.name}")
         
         self.FixedPolicy = PPO(**self.fixed_ppo_networks_configuration, action_range=self.action_range, agent_name=self.name,summary_writer=self.writer) 
-        self.FixedPolicy.build_models() #build models (Critic, Actor Networks)
+        self.FixedPolicy.build_models_old() #build models (Critic, Actor Networks)
         self.PPO = PPO(**self.ppo_networks_configuration, action_range=self.action_range, agent_name=self.name,summary_writer=self.writer)
         self.PPO.build_models() #build models (Critic, Actor Networks)
         # ---
@@ -1228,9 +1232,9 @@ ppo_networks_configuration = {"trunk_config": {"layer_sizes": [100, 80, 70],
                                       "activations": [tf.nn.leaky_relu, tf.nn.leaky_relu, tf.nn.leaky_relu]},
 
                      "mu_head_config": {"layer_sizes": [60, 50, 1],
-                                        "activations": [tf.nn.leaky_relu, tf.nn.leaky_relu, "relu"]},
+                                        "activations": [tf.nn.leaky_relu, tf.nn.leaky_relu, "linear"]},
                      "cov_head_config": {"layer_sizes": [60, 50, 1],
-                                        "activations": [tf.nn.leaky_relu,tf.nn.leaky_relu, "relu"]},
+                                        "activations": [tf.nn.leaky_relu,tf.nn.leaky_relu, "linear"]},
                      "critic_net_config": {"layer_sizes": [100, 100, 100, 80, 40, 1],
                                             "activations": [tf.nn.leaky_relu, tf.nn.leaky_relu,tf.nn.leaky_relu, tf.nn.leaky_relu, tf.nn.leaky_relu, "linear"]},
                      "input_layer_size": 7
