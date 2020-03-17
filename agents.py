@@ -57,8 +57,19 @@ def summarize_performance(path):
     # print("Total reward", production_system.sum_rewards)
 
     return (lead_time, flow_time, wip, throughput, parts_produced)
-
-def build_networks(layer_sizes, activations, input):
+def build_networks (layer_sizes, activations, input):
+    num_layers = len(layer_sizes)
+    output = keras.layers.Dense(units=layer_sizes[0], kernel_initializer='glorot_normal')(input)
+    output = keras.layers.PReLU()(output)
+    for i in range(1, num_layers):
+        if i == num_layers - 1:
+            output = keras.layers.Dense(units=layer_sizes[i], activation=activations[i], kernel_initializer='glorot_normal')(output)
+        else:
+            output = keras.layers.Dense(units=layer_sizes[i], kernel_initializer='glorot_normal')(output)
+            output = keras.layers.PReLU()(output)
+    
+    return output
+def build_networks_old(layer_sizes, activations, input):
     num_layers = len(layer_sizes)
     output = keras.layers.Dense(units=layer_sizes[0], activation=activations[0], kernel_initializer='glorot_normal')(input)
     for i in range(1, num_layers):
@@ -147,6 +158,66 @@ class PPO(BasePolicy):
             self.trunk_old = build_networks(**self.trunk_config, input=self.input)
             mu_head_old = build_networks(**self.mu_head_config, input=self.trunk_old)
             cov_head_old = build_networks(**self.cov_head_config, input=self.trunk_old)
+            self.actor_mu_old = build_model(self.input, mu_head_old, "actor_mu_old")
+            self.actor_cov_old = build_model(self.input, cov_head_old, "actor_cov_old")
+
+            #---Start Find the variables of the actor cov model
+            actor_cov_n_layers_head_old = len(self.cov_head_config["layer_sizes"])
+            actor_cov_total_n_layers_old = len(self.actor_cov_old.layers)
+            cov_head_variables_old = []
+            for i in range (actor_cov_total_n_layers_old - actor_cov_n_layers_head_old, actor_cov_total_n_layers_old, 1):
+                for variable in self.actor_cov_old.get_layer(index = i).trainable_variables:
+                    cov_head_variables_old.append(variable)
+        #---END Find the variables of the actor cov model
+            self.cov_head_variables_old = cov_head_variables_old
+            self.variables_old =  {"mu": self.actor_mu_old.trainable_variables,
+                            "cov": cov_head_variables_old}
+            
+            self.current_parameters_old =  {"mu": [variable.numpy() for variable in self.actor_mu_old.trainable_variables],
+                           "cov": [variable.numpy() for variable in cov_head_variables_old],
+                           "critic": [variable.numpy() for variable in self.critic.trainable_variables]
+                           }
+
+    def build_models_old(self):
+
+        self.input = keras.Input(shape=(self.input_layer_size), name="state", dtype=tf.float32)
+        self.trunk = build_networks_old(**self.trunk_config, input=self.input)
+        mu_head = build_networks_old(**self.mu_head_config, input=self.trunk)
+        cov_head = build_networks_old(**self.cov_head_config, input=self.trunk)
+        critic = build_networks_old(**self.critic_net_config, input=self.input)
+        
+        # Creates a model for mu cov and critic
+        self.actor_mu = build_model(self.input, mu_head, "actor_mu")
+        self.actor_cov = build_model(self.input, cov_head, "actor_cov")
+        self.critic = build_model(self.input, critic, "critic")
+        #---Start Find the variables of the actor cov model
+        actor_cov_n_layers_head = len(self.cov_head_config["layer_sizes"])
+        actor_cov_total_n_layers = len(self.actor_cov.layers)
+        cov_head_variables = []
+        
+        for i in range (actor_cov_total_n_layers - actor_cov_n_layers_head, actor_cov_total_n_layers, 1):
+            for variable in self.actor_cov.get_layer(index = i).trainable_variables:
+                cov_head_variables.append(variable)
+        #---END Find the variables of the actor cov model
+        self.cov_head_variables = cov_head_variables
+        # ---START Creates a way to access the  current value of the weights of the networks
+        # actor_mu and actor_cov will be identical with exception of the output layer
+        self.current_parameters = {"mu": [variable.numpy() for variable in self.actor_mu.trainable_variables],
+                           "cov": [variable.numpy() for variable in cov_head_variables],
+                           "critic": [variable.numpy() for variable in self.critic.trainable_variables]
+                           }
+        # ---END Creates a way to access the  current value of the weights of the networks
+        # ---START Creates a way to acess the variables of the models (used to apply the gradients)
+        self.variables = {"mu": self.actor_mu.trainable_variables,
+                        "cov": cov_head_variables,
+                        "critic": self.critic.trainable_variables}
+        # ---END Creates a way to acess the variables of the models (used to apply the gradients)
+
+        if self.agent_name == "Global Agent":
+          
+            self.trunk_old = build_networks_old(**self.trunk_config, input=self.input)
+            mu_head_old = build_networks_old(**self.mu_head_config, input=self.trunk_old)
+            cov_head_old = build_networks_old(**self.cov_head_config, input=self.trunk_old)
             self.actor_mu_old = build_model(self.input, mu_head_old, "actor_mu_old")
             self.actor_cov_old = build_model(self.input, cov_head_old, "actor_cov_old")
             
@@ -560,10 +631,20 @@ class GlobalAgent(Agent):
             self.con_wip_model = FixedPolicy(self.conwip, self.action_range)
             # Creates the networks for the fixed policy
             self.FixedPolicy = PPO(**self.fixed_ppo_networks_configuration, action_range=self.action_range, agent_name=self.name, summary_writer= self.writer)
-            self.FixedPolicy.build_models() #build models (Critic, Actor Networks) 
+            self.FixedPolicy.build_models_old() #build models (Critic, Actor Networks) 
             self.FixedPolicy.name = "Wip set by Fixed_Policy"
+            # print(f"Fixed Policy")
+            # print(f"Mu")
+            # self.FixedPolicy.actor_mu.summary()
+
+            # self.FixedPolicy.actor_cov.summary()
             self.PPO = PPO(**self.ppo_networks_configuration, action_range=self.action_range, agent_name=self.name, summary_writer= self.writer)
             self.PPO.build_models() #build models (Critic, Actor Networks) 
+            # print(f"PPO")
+            # print(f"Mu")
+            # self.PPO.actor_mu.summary()
+            # print(f"Cov")
+            # self.PPO.actor_cov.summary()
             print(f"1 optimization cycle corresponds to {self.number_of_child_agents * self.number_episodes_worker} episodes and {self.gradient_steps_per_episode_actor} gradient steps")
             
             self.number_episodes_extracted = 0     
@@ -1038,33 +1119,33 @@ class WorkerAgent(Agent):
                         )
 
     def restore_old_models_fixed_policy(self, ppo_config_fixed):
-        try:
-            self.FixedPolicy.critic.load_weights("./Fixed_policy_weights/critic/")
-            self.FixedPolicy.actor_mu.load_weights("./Fixed_policy_weights/actor_mu/")
-            self.FixedPolicy.actor_cov.load_weights("./Fixed_policy_weights/actor_cov/")
-            
-            actor_cov_n_layers_head = len(ppo_config_fixed["mu_head_config"]["layer_sizes"])
-            actor_cov_total_n_layers = len(self.FixedPolicy.actor_cov.layers)
-            cov_head_variables = []
+        # try:
+        self.FixedPolicy.critic.load_weights("./Fixed_policy_weights/critic/")
+        self.FixedPolicy.actor_mu.load_weights("./Fixed_policy_weights/actor_mu/")
+        self.FixedPolicy.actor_cov.load_weights("./Fixed_policy_weights/actor_cov/")
+        
+        actor_cov_n_layers_head = len(ppo_config_fixed["mu_head_config"]["layer_sizes"])
+        actor_cov_total_n_layers = len(self.FixedPolicy.actor_cov.layers)
+        cov_head_variables = []
 
-            for i in range (actor_cov_total_n_layers - actor_cov_n_layers_head, actor_cov_total_n_layers, 1):
-                for variable in self.FixedPolicy.actor_cov.get_layer(index = i).trainable_variables:
-                    cov_head_variables.append(variable)
+        for i in range (actor_cov_total_n_layers - actor_cov_n_layers_head, actor_cov_total_n_layers, 1):
+            for variable in self.FixedPolicy.actor_cov.get_layer(index = i).trainable_variables:
+                cov_head_variables.append(variable)
 
-            self.FixedPolicy.cov_head_variables = cov_head_variables
-            
-            self.FixedPolicy.current_parameters = {"mu": [variable.numpy() for variable in self.FixedPolicy.actor_mu.trainable_variables],
-                           "cov": [variable.numpy() for variable in cov_head_variables],
-                           "critic": [variable.numpy() for variable in self.FixedPolicy.critic.trainable_variables]
-                           }
+        self.FixedPolicy.cov_head_variables = cov_head_variables
+        
+        self.FixedPolicy.current_parameters = {"mu": [variable.numpy() for variable in self.FixedPolicy.actor_mu.trainable_variables],
+                    "cov": [variable.numpy() for variable in cov_head_variables],
+                    "critic": [variable.numpy() for variable in self.FixedPolicy.critic.trainable_variables]
+                    }
 
-            #check if variables in fact were loaded
-            # for key, model in self.FixedPolicy.current_parameters.items():
-            #     for variable in model:
-            #         tf.print(variable)        
-            return "Loading models for the fixed policy of the Worker was succefull"
-        except Exception as message:
-            return (str(message) + "\n" + "The weights for the fixed policy of the worker will be randomly generated")
+        #check if variables in fact were loaded
+        # for key, model in self.FixedPolicy.current_parameters.items():
+        #     for variable in model:
+        #         tf.print(variable)        
+        return f"Loading models for the fixed policy of the {self.name} was successfull"
+        # except Exception as message:
+        #     return (str(message) + "\n" + f"The weights for the fixed policy of the {self.name} will be randomly generated")
 
         
      
@@ -1083,7 +1164,7 @@ class WorkerAgent(Agent):
         # ---
 
         message = self.restore_old_models_fixed_policy(self.fixed_ppo_networks_configuration)
-        print(message)           
+        print(message)         
     
         while self.current_number_episodes.value < self.total_number_episodes:
             self.number_episodes_run_upuntil = self.current_number_episodes.value
@@ -1155,16 +1236,16 @@ ppo_networks_configuration = {"trunk_config": {"layer_sizes": [100, 80, 70],
                      "input_layer_size": 7
                        }
 fixed_ppo_networks_configuration = {"trunk_config": {"layer_sizes": [100, 80, 70],
-                                      "activations": [tf.nn.leaky_relu, tf.nn.leaky_relu, tf.nn.leaky_relu]},
+                                      "activations": ["elu", "elu", "elu"]},
 
                      "mu_head_config": {"layer_sizes": [60, 50, 1],
-                                        "activations": [tf.nn.leaky_relu, tf.nn.leaky_relu, "relu"]},
+                                        "activations": ["elu", "elu", "relu"]},
                      "cov_head_config": {"layer_sizes": [60, 50, 1],
-                                        "activations": [tf.nn.leaky_relu,tf.nn.leaky_relu, "relu"]},
+                                        "activations": ["elu","elu", "relu"]},
                      "critic_net_config": {"layer_sizes": [100, 100, 100, 80, 40, 1],
-                                            "activations": [tf.nn.leaky_relu, tf.nn.leaky_relu,tf.nn.leaky_relu, tf.nn.leaky_relu, tf.nn.leaky_relu, "linear"]},
+                                            "activations": ["relu", "relu","relu", "relu", "relu", "linear"]},
                      "input_layer_size": 7
-                       }
+                        }
 
 hyperparameters = {"ppo_networks_configuration" : ppo_networks_configuration,
                    "fixed_ppo_networks_configuration": fixed_ppo_networks_configuration,
