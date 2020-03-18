@@ -60,13 +60,13 @@ def summarize_performance(path):
 def build_networks (layer_sizes, activations, input, istrunk=False):
     num_layers = len(layer_sizes)
     output = keras.layers.Dense(units=layer_sizes[0], kernel_initializer='glorot_normal')(input)
-    output = keras.layers.PReLU()(output)
+    output = keras.layers.ELU(alpha=3)(output)
     for i in range(1, num_layers):
         if i == num_layers - 1 and not istrunk:
             output = keras.layers.Dense(units=layer_sizes[i], activation=activations[i], kernel_initializer='glorot_normal')(output)
         else:
             output = keras.layers.Dense(units=layer_sizes[i], kernel_initializer='glorot_normal')(output)
-            output = keras.layers.PReLU()(output)
+            output = keras.layers.ELU(alpha=3)(output)
     
     return output
 def build_networks_old(layer_sizes, activations, input):
@@ -132,7 +132,10 @@ class PPO(BasePolicy):
         self.critic = build_model(self.input, critic, "critic")
         #---Start Find the variables of the actor cov model
         actor_cov_n_layers_head = len(self.cov_head_config["layer_sizes"]) * 2 - 1
+        # print(f"Number cov head {actor_cov_n_layers_head}")
         actor_cov_total_n_layers = len(self.actor_cov.layers)
+        # print(f"Number cov Layers: {actor_cov_total_n_layers}")
+        # exit()
         cov_head_variables = []
         
         for i in range (actor_cov_total_n_layers - actor_cov_n_layers_head, actor_cov_total_n_layers, 1):
@@ -146,6 +149,11 @@ class PPO(BasePolicy):
                            "cov": [variable.numpy() for variable in cov_head_variables],
                            "critic": [variable.numpy() for variable in self.critic.trainable_variables]
                            }
+        # for key, variables in self.current_parameters.items():
+        #     print(key)
+        #     for var in variables:
+        #         print(var.shape) 
+
         # ---END Creates a way to access the  current value of the weights of the networks
         # ---START Creates a way to acess the variables of the models (used to apply the gradients)
         self.variables = {"mu": self.actor_mu.trainable_variables,
@@ -170,6 +178,7 @@ class PPO(BasePolicy):
                     cov_head_variables_old.append(variable)
         #---END Find the variables of the actor cov model
             self.cov_head_variables_old = cov_head_variables_old
+
             self.variables_old =  {"mu": self.actor_mu_old.trainable_variables,
                             "cov": cov_head_variables_old}
             
@@ -586,7 +595,7 @@ class GlobalAgent(Agent):
             self.PPO.actor_mu.load_weights("./saved_checkpoints/actor_mu/")
             self.PPO.actor_cov.load_weights("./saved_checkpoints/actor_cov/")
             
-            actor_cov_n_layers_head = len(ppo_config["mu_head_config"]["layer_sizes"])
+            actor_cov_n_layers_head = len(ppo_config["mu_head_config"]["layer_sizes"]) * 2 - 1
             actor_cov_total_n_layers = len(self.PPO.actor_cov.layers)
             cov_head_variables = []
 
@@ -638,7 +647,6 @@ class GlobalAgent(Agent):
             # print(f"Fixed Policy")
             # print(f"Mu")
             # self.FixedPolicy.actor_mu.summary()
-
             # self.FixedPolicy.actor_cov.summary()
             self.PPO = PPO(**self.ppo_networks_configuration, action_range=self.action_range, agent_name=self.name, summary_writer= self.writer)
             self.PPO.build_models() #build models (Critic, Actor Networks) 
@@ -647,6 +655,8 @@ class GlobalAgent(Agent):
             # self.PPO.actor_mu.summary()
             # print(f"Cov")
             # self.PPO.actor_cov.summary()
+            # exit()
+
             print(f"1 optimization cycle corresponds to {self.number_of_child_agents * self.number_episodes_worker} episodes and {self.gradient_steps_per_episode_actor} gradient steps")
             
             self.number_episodes_extracted = 0     
@@ -655,13 +665,15 @@ class GlobalAgent(Agent):
                 try:
                     with open("./saved_checkpoints/optimizers/actor/actor_optimizer_mu.pkl", "rb") as file:
                         self.actor_optimizer_mu = pickle.load(file)
-                    
+                        self.actor_optimizer_mu.learning_rate.assign(0.00001)
                     
                     with open("./saved_checkpoints/optimizers/actor/actor_optimizer_cov.pkl", "rb") as file:
                         self.actor_optimizer_cov = pickle.load(file)
-                    
+                        self.actor_optimizer_cov.learning_rate.assign(0.00001)  
+
                     with open("./saved_checkpoints/optimizers/critic/critic_optimizer.pkl", "rb") as file:
                         self.critic_optimizer = pickle.load(file)
+                        # self.critic_optimizer.learning_rate.assign(0.00001)
                 
                 except Exception as e :    
                     print(e)
@@ -690,8 +702,7 @@ class GlobalAgent(Agent):
                 for i in range(self.number_of_child_agents):
                     #Put enough parameters for all workers
                     self.parameters_queue.put(self.PPO.current_parameters_old, block=True, timeout=30)
-            
-                    
+
                 #---START Record the values for the weights of policy gradient NN
                 if self.record_statistics:
                     with self.writer.as_default():
@@ -817,7 +828,7 @@ class GlobalAgent(Agent):
                         for n, variable in enumerate(self.PPO.variables_old[key]):
                             variable.assign(value[n])
                 #---END Update Old policy seting theta_old = theta
-                
+   
                 #---START updattrigger = True self.current_parameter_old with 
                 self.current_parameters_old = self.current_parameters
                 
@@ -1203,6 +1214,15 @@ class WorkerAgent(Agent):
         except Exception as e:
             print(e)
         
+        
+        # for key, value in self.new_params.items():
+        #     print(key)
+        #     for n, variable in enumerate(self.PPO.variables[key]):
+        #         print(f"Variable to be passed {value[n].shape}")
+        #         print(f"Variable to be updated{variable}")
+        
+        # exit()
+
         #---
         #---START assign the variables of the worker with the variable values from global
         for key, value in self.new_params.items():
@@ -1277,7 +1297,7 @@ agent_config = {
 if __name__ == "__main__":
     
     multiprocessing.set_start_method('spawn')
-    number_of_workers = 4
+    number_of_workers = 4 
 
     params_queue = Manager().Queue(number_of_workers)
     current_number_episodes = Manager().Value("i", 0)    
