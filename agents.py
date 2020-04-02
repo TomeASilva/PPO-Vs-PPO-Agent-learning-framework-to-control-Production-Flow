@@ -1003,6 +1003,7 @@ class GlobalAgent(Agent):
             #---Entropy
             entropy = self.probability_density_func.entropy()
             entropy_average = tf.reduce_mean(entropy)
+            entropy_average = tf.stop_gradient(entropy_average)
             
             #---
             #---START compute the probability of the actions taken at the current episode
