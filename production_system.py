@@ -223,10 +223,11 @@ class ProductionSystem:
                 # print(self.previous_state)
                 # We should pass an array to action, so that we get Wip as an integer
                 self.action = self.policy.get_action(self.previous_state) #int
-
+                
                
 
-                self.wip_cap = self.action # int
+                self.wip_cap = int(max(min(self.action, self.policy.action_range[1]),self.policy.action_range[0])) # int
+
 
                 self.state = [0, 0, 0, 0, 0, 0, 0]
                 self.state_element_number_updates = [0, 0, 0, 0, 0, 0, 0]
@@ -358,14 +359,14 @@ class ProductionSystem:
                 processing_time * (1 - self.weighted_average_beta)
                 
     def compute_reward(self, state,  action):
-        if self.twin_system != None:
+        if self.twin_system != None: 
             if self.parts_produced_epoch >= self.twin_system.parts_produced_epoch and state[0, 0] < self.twin_system.next_state[0, 0]:
                 reward = (self.parts_produced_epoch - self.twin_system.parts_produced_epoch) + self.twin_system.next_state[0, 0] - state[0, 0]
             else:
                 reward = (self.parts_produced_epoch - self.twin_system.parts_produced_epoch) + self.twin_system.next_state[0, 0] - state[0, 0]
                 
         else: 
-            reward = 0 
+            reward = 1 
         self.sum_rewards = self.sum_rewards + reward  # track the sum of rewards
         return reward 
         

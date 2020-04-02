@@ -264,8 +264,6 @@ class PPO(BasePolicy):
         # ---START Generates the average and standard deviation for the wip at the given stage
         mu = self.actor_mu(state)
         cov = self.actor_cov(state)
-        mu = tf.clip_by_value(mu, 1, self.action_range[1]) 
-        cov = tf.clip_by_value(cov, 1, self.action_range[1]) 
         # print(f"Average: {mu}")
         # print(f"Std: {cov}")
         # ---END Generates the average and standard deviation for the wip at the given stage
@@ -275,17 +273,15 @@ class PPO(BasePolicy):
         # Samples a WIP from the distribution
         action = probability_density_func.sample()
 
-        action = tf.clip_by_value(action, self.action_range[0], self.action_range[1])
-        
-        if self.summary_writer != None:
-             with self.summary_writer.as_default():
-                 tf.summary.histogram("Mu dist_" + self.agent_name, mu, self.number_action_calls)
-                 tf.summary.histogram("Cov dist_" + self.agent_name, cov, self.number_action_calls)
-                 tf.summary.histogram("Action_" + self.agent_name, action, self.number_action_calls)
-                 
+        if self.summary_writer != None: 
+            with self.summary_writer.as_default():
+                tf.summary.histogram("Mu dist_" + self.agent_name, mu, self.number_action_calls)
+                tf.summary.histogram("Cov dist_" + self.agent_name, cov, self.number_action_calls)
+                tf.summary.histogram("Action_" + self.agent_name, action, self.number_action_calls)
+                
         # print(f"Action: {action}")
         self.number_action_calls += 1
-        return int(action)
+        return action
 
     def get_state_value(self, state):
         state_value = self.critic(state)
@@ -952,7 +948,7 @@ class GlobalAgent(Agent):
         value = self.PPO.critic(state)
         return value
     
-    @tf.function(input_signature=(tf.TensorSpec(shape=[None, 7]), tf.TensorSpec(shape=[None, 1]), tf.TensorSpec(shape=[None, 1])))  
+    # @tf.function(input_signature=(tf.TensorSpec(shape=[None, 7]), tf.TensorSpec(shape=[None, 1]), tf.TensorSpec(shape=[None, 1])))  
     def gradient_actor(self, states, actions, Qsa):
         with tf.GradientTape(persistent=True) as tape:
             if self.log_gradient_descent:       
@@ -967,7 +963,6 @@ class GlobalAgent(Agent):
                     gradient_logger.debug(value)
 
             mu = self.PPO.actor_mu(states)
-            mu = tf.clip_by_value(mu, 0, self.action_range[1])
             
             if self.log_gradient_descent:        
                 gradient_logger.debug(f"MU")
@@ -975,7 +970,6 @@ class GlobalAgent(Agent):
                     gradient_logger.debug (value)
                 
             cov = self.PPO.actor_cov(states)
-            cov = tf.clip_by_value(cov, 0, self.action_range[1])
             
             if self.log_gradient_descent:        
                 gradient_logger.debug(f"Cov")
@@ -983,9 +977,7 @@ class GlobalAgent(Agent):
                     gradient_logger.debug(value)
                 
             mu_old = tf.stop_gradient(self.PPO.actor_mu_old(states))
-            mu_old = tf.clip_by_value(mu_old, 0, self.action_range[1])
             cov_old = tf.stop_gradient(self.PPO.actor_cov_old(states))
-            cov_old = tf.clip_by_value(cov_old, 0, self.action_range[1])
             
             if self.log_gradient_descent:        
                 gradient_logger.debug(f"MU_old")
@@ -1252,9 +1244,9 @@ ppo_networks_configuration = {"trunk_config": {"layer_sizes": [100, 80, 70],
                                       "activations": ["elu",   "elu", "elu"]},
 
                      "mu_head_config": {"layer_sizes": [60, 50, 1],
-                                        "activations": ["elu", "elu", "linear"]},
+                                        "activations": ["elu", "elu", "relu"]},
                      "cov_head_config": {"layer_sizes": [60, 50, 1],
-                                        "activations": ["elu","elu", "linear"]},
+                                        "activations": ["elu","elu", "relu"]},
                      "critic_net_config": {"layer_sizes": [100, 100, 100, 80, 40, 1],
                                             "activations": ["elu", "elu","elu", "elu", "elu", "linear"]},
                      "input_layer_size": 7
@@ -1287,7 +1279,7 @@ hyperparameters = {"ppo_networks_configuration" : ppo_networks_configuration,
                     "n_reward_returns": 20
                     }
 agent_config = {
-    "action_range": (1, 100),
+    "action_range": (0, 100),
     "total_number_episodes" : 100000,
     "conwip": 10000,
     "warm_up_length": 100,
