@@ -264,8 +264,8 @@ class PPO(BasePolicy):
         # ---START Generates the average and standard deviation for the wip at the given stage
         mu = self.actor_mu(state)
         cov = self.actor_cov(state)
-        mu = tf.clip_by_value(mu, 0, self.action_range[1]) 
-        cov = tf.clip_by_value(cov, 0, self.action_range[1]) 
+        mu = tf.clip_by_value(mu, 1, self.action_range[1]) 
+        cov = tf.clip_by_value(cov, 1, self.action_range[1]) 
         # print(f"Average: {mu}")
         # print(f"Std: {cov}")
         # ---END Generates the average and standard deviation for the wip at the given stage
@@ -1249,14 +1249,14 @@ production_system_configuration = {
 
 
 ppo_networks_configuration = {"trunk_config": {"layer_sizes": [100, 80, 70],
-                                      "activations": [tf.nn.leaky_relu, tf.nn.leaky_relu, tf.nn.leaky_relu]},
+                                      "activations": ["elu",   "elu", "elu"]},
 
                      "mu_head_config": {"layer_sizes": [60, 50, 1],
-                                        "activations": [tf.nn.leaky_relu, tf.nn.leaky_relu, "linear"]},
+                                        "activations": ["elu", "elu", "linear"]},
                      "cov_head_config": {"layer_sizes": [60, 50, 1],
-                                        "activations": [tf.nn.leaky_relu,tf.nn.leaky_relu, "linear"]},
+                                        "activations": ["elu","elu", "linear"]},
                      "critic_net_config": {"layer_sizes": [100, 100, 100, 80, 40, 1],
-                                            "activations": [tf.nn.leaky_relu, tf.nn.leaky_relu,tf.nn.leaky_relu, tf.nn.leaky_relu, tf.nn.leaky_relu, "linear"]},
+                                            "activations": ["elu", "elu","elu", "elu", "elu", "linear"]},
                      "input_layer_size": 7
                        }
 fixed_ppo_networks_configuration = {"trunk_config": {"layer_sizes": [100, 80, 70],
@@ -1276,7 +1276,7 @@ hyperparameters = {"ppo_networks_configuration" : ppo_networks_configuration,
                    "actor_optimizer_mu": tf.keras.optimizers.SGD(learning_rate=0.0001, momentum=0.9),
                    "actor_optimizer_cov": tf.keras.optimizers.SGD(learning_rate=0.0001, momentum=0.9),
                     "critic_optimizer": tf.keras.optimizers.SGD(learning_rate=0.0001, momentum=0.9),
-                    "entropy": 0.01,
+                    "entropy": 1,  
                     "gamma":0.999,
                     "gradient_clipping_actor": 1.0, 
                     "gradient_clipping_critic": 1.0, 
@@ -1287,7 +1287,7 @@ hyperparameters = {"ppo_networks_configuration" : ppo_networks_configuration,
                     "n_reward_returns": 20
                     }
 agent_config = {
-    "action_range": (0, 100),
+    "action_range": (1, 100),
     "total_number_episodes" : 100000,
     "conwip": 10000,
     "warm_up_length": 100,

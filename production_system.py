@@ -102,6 +102,7 @@ class ProductionSystem:
         self.buffers = []
         self.order_buffer = None
         self.parts_produced = 0
+        self.parts_produced_epoch = 0
 
         self.create_stations = self.stations()
 
@@ -229,6 +230,7 @@ class ProductionSystem:
 
                 self.state = [0, 0, 0, 0, 0, 0, 0]
                 self.state_element_number_updates = [0, 0, 0, 0, 0, 0, 0]
+                self.parts_produced_epoch = 0
 
                 yield self.env.timeout(self.decision_epoch_interval)
                 # <<<<
@@ -357,10 +359,10 @@ class ProductionSystem:
                 
     def compute_reward(self, state,  action):
         if self.twin_system != None:
-            if self.parts_produced >= self.twin_system.parts_produced and state[0, 0] < self.twin_system.next_state[0, 0]:
-                reward = (self.parts_produced - self.twin_system.parts_produced) + self.twin_system.next_state[0, 0] - state[0, 0]
+            if self.parts_produced_epoch >= self.twin_system.parts_produced_epoch and state[0, 0] < self.twin_system.next_state[0, 0]:
+                reward = (self.parts_produced_epoch - self.twin_system.parts_produced_epoch) + self.twin_system.next_state[0, 0] - state[0, 0]
             else:
-                reward = (self.parts_produced - self.twin_system.parts_produced) + self.twin_system.next_state[0, 0] - state[0, 0]
+                reward = (self.parts_produced_epoch - self.twin_system.parts_produced_epoch) + self.twin_system.next_state[0, 0] - state[0, 0]
                 
         else: 
             reward = 0 
@@ -585,6 +587,7 @@ class Part():
                     logger.debug(f"{self.name}, Exited the production system at  {self.env.now}")
                 
                 self.production_system.parts_produced += 1
+                self.production_system.parts_produced_epoch += 1
                 # Update throughput time
                 # self.production_system.update_throughput_time(
                 #     self.shop_e - self.production_system.previous_exit_time)

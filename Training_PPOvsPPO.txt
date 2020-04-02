@@ -1,0 +1,10 @@
+- Implemented Prelu activation functions: Poor results, prelu is non-differentialble around zero, therefore when layers output around 0 
+the gradient vanishes. 
+-Implement with Elus, experiment with alpha parameter
+	- alpha = 3- it worked well, but action loss plateu
+-Decrease Learning rate
+-Test training by rewarding according to parts produced during decision epoch interval and not since the start of 
+the simulation.
+
+1840 episodes
+	
